@@ -12,7 +12,14 @@ module.exports = function(RED) {
 
         // initiate the dmx data array
         this.addresses = [];
-        for (var i = 0; i < this.size; i++) this.addresses[i] = 0;
+        this.timers = [];
+        this.intervals = [];
+
+        for (var i = 0; i < this.size; i++){
+            this.addresses[i] = 0;
+            this.timers[i] = null;
+            this.intervals[i] = null;
+        }
 
         var node = this;
 
@@ -45,9 +52,12 @@ module.exports = function(RED) {
         });
 
         function sendDMX(values) {
+            var DMXvalues = []
+            for (var i = 0; i < values.length; i++) DMXvalues[i] = Math.round(values[i]);
+
             var post_data = querystring.stringify({
                 u: node.universe,
-                d: values.join(',')
+                d: DMXvalues.join(',')
             });
 
             var post_options = {
@@ -75,42 +85,42 @@ module.exports = function(RED) {
         function fadeToValue(channel, new_value, transition_time) {
             var old_values = node.addresses;
 
-            var steps = transition_time / 100;
+            var steps = parseInt(transition_time / 25);
+
+            // clear previous timers
+            if (node.intervals[channel - 1] != null){
+                clearInterval(node.intervals[channel - 1]);
+            }
+            if (node.timers[channel - 1] != null){
+                clearTimeout(node.timers[channel - 1]);
+            }
+
 
             // calculate difference between new and old values
             diff = Math.abs(old_values[channel - 1] -  new_value);
 
-            if (diff <= steps) { // cannot be completed in the amount of steps, so reduce to just one step
-                steps = 1;
-            }
 
             // should we fade up or down?
             if (new_value > old_values[channel - 1]) {
-                var direction = true;
+                var step_value =  diff / steps;
             } else {
-                var direction = false;
+                var step_value =  (diff / steps) * -1;
             }
 
-            var value_per_step = diff / steps;
             var time_per_step = transition_time / steps;
 
-            for (i = 1; i < steps; i++) {
-                // create time outs for each step
-                setTimeout(function() {
-                    if (direction === true) {
-                        var value = Math.round(node.addresses[channel - 1] + value_per_step);
-                    } else {
-                        var value = Math.round(node.addresses[channel - 1] - value_per_step);
-                    }
+            // create time outs for each step
+            node.intervals[channel -1 ] = setInterval(function() {
+                node.addresses[channel - 1] +=  step_value;
+                sendDMX(node.addresses);
+            }, time_per_step);
 
-                    node.addresses[channel - 1] = value;
-                    sendDMX(node.addresses);
-                }, i * time_per_step);
-            }
-
-            setTimeout(function() {
+            node.timers[channel-1] = setTimeout(function() {
+                clearInterval(node.intervals[channel - 1]);
+                node.intervals[channel - 1] = null;
                 node.addresses[channel - 1] = new_value;
                 sendDMX(node.addresses);
+                node.timers[channel - 1] = null;
             }, transition_time);
         }
     }
